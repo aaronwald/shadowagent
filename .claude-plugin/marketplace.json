@@ -1,0 +1,18 @@
+{
+  "name": "shadowagent",
+  "owner": {
+    "name": "shadow"
+  },
+  "metadata": {
+    "description": "Exchange domain knowledge agents for prediction markets and crypto derivatives",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "shadow",
+      "source": "./",
+      "description": "Exchange-pure domain agents (Kalshi, Kraken, Polymarket, Symbology)",
+      "version": "1.0.0"
+    }
+  ]
+}
