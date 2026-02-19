@@ -130,6 +130,38 @@ GET /derivatives/api/v3/instruments                                # Available i
 | Funding rate = 0 | Market in equilibrium | Normal; not an error |
 | Large openInterest values | Units in contracts (BTC) | Multiply by price for USD notional |
 
+**Secmaster Entity Model (PostgreSQL):**
+
+```
+pairs (PK: pair_id)
+  ├── pair_id        varchar(128)  -- e.g., "kraken:PF_XBTUSD"
+  ├── exchange       varchar(32)   -- "kraken"
+  ├── base/quote     varchar(16)   -- BTC/USD
+  ├── ws_name        varchar(32)   -- WebSocket symbol
+  ├── market_type    varchar(16)   -- "perpetual" or "spot"
+  ├── contract_type  varchar(32)
+  ├── funding_rate   numeric(18,12)
+  ├── funding_rate_prediction numeric(18,12)
+  ├── mark_price     numeric(18,8)
+  ├── open_interest  numeric(24,8)
+  └── tradeable/suspended boolean
+
+pair_snapshots (FK: pair_id → pairs.pair_id)
+  ├── pair_id        varchar(128)
+  ├── mark_price     numeric(18,8)
+  ├── funding_rate   numeric(18,12)
+  ├── funding_rate_prediction numeric(18,12)
+  ├── open_interest  numeric(24,8)
+  ├── bid/ask        numeric(18,8)
+  └── snapshot_at    timestamptz   -- 5-min interval snapshots
+```
+
+Relationship: `pairs` 1->N `pair_snapshots` (time-series)
+
+Sync: `ssmd-kraken-sync` CronJob runs `kraken sync` every 6h (+10min offset). Syncs instruments from Kraken REST API.
+
+Key detail: pair_id format is `{exchange}:{product_id}` (e.g., `kraken:PF_XBTUSD`). Pair snapshots have 60-day retention.
+
 Analyze from your specialty perspective and return:
 
 ## Concerns (prioritized)

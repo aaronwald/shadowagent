@@ -130,6 +130,57 @@ Authenticated:
 - Some authenticated endpoints return centi-cents (divide by 10,000)
 - Market ticker format: `{SERIES}-{DATE}-T{STRIKE}` (e.g., KXBTCD-26FEB03-T97500)
 
+**Secmaster Entity Model (PostgreSQL):**
+
+```
+series (PK: ticker)
+  ├── ticker         varchar(128)  -- e.g., "KXBTCD"
+  ├── title          text
+  ├── category       varchar(128)  -- Crypto, Sports, Politics, etc.
+  ├── tags           text[]
+  ├── is_game        boolean       -- Sports: GAME/MATCH in ticker
+  ├── active         boolean
+  └── volume         bigint
+
+events (PK: event_ticker, FK: series_ticker → series.ticker)
+  ├── event_ticker   varchar(128)  -- e.g., "KXBTCD-26FEB03"
+  ├── series_ticker  varchar(128)
+  ├── title          text
+  ├── category       varchar(128)
+  ├── strike_date    timestamptz
+  ├── status         varchar(16)   -- open, closed, settled
+  └── mutually_exclusive boolean
+
+markets (PK: ticker, FK: event_ticker → events.event_ticker)
+  ├── ticker         varchar(128)  -- e.g., "KXBTCD-26FEB03-T97500"
+  ├── event_ticker   varchar(128)
+  ├── title          text
+  ├── status         varchar(16)   -- open, active, closed, settled
+  ├── close_time     timestamptz
+  ├── yes_bid/ask    integer       -- cents (0-100)
+  ├── volume         bigint
+  └── open_interest  bigint
+
+series_fees (FK: series_ticker → series.ticker)
+  ├── series_ticker  varchar(128)
+  ├── fee_type       enum(quadratic, quadratic_with_maker_fees, flat)
+  ├── fee_multiplier numeric(6,4)
+  ├── effective_from timestamptz
+  └── effective_to   timestamptz
+
+market_lifecycle_events
+  ├── market_ticker  varchar(128)
+  ├── event_type     varchar(32)   -- created, activated, deactivated, close_date_updated, determined, settled
+  ├── open_ts, close_ts, settled_ts
+  └── metadata       jsonb
+```
+
+Relationship chain: `series` 1->N `events` 1->N `markets`
+
+Sync: `ssmd-secmaster-crypto` CronJob runs `secmaster sync --by-series --category Crypto` every 6h. Syncs from Kalshi REST API to PostgreSQL.
+
+Key gotcha: `category` is on events and series, NOT on markets. To query markets by category, JOIN through events.
+
 Analyze from your specialty perspective and return:
 
 ## Concerns (prioritized)

@@ -86,6 +86,40 @@ Messages are array-wrapped JSON (unlike Kalshi's single objects):
 | Null category | Gamma `/markets` API deprecated field | Use `/events` with tags[] instead |
 | Large data volume | All-market subscription | Filter to relevant categories/tokens |
 
+**Secmaster Entity Model (PostgreSQL):**
+
+```
+polymarket_conditions (PK: condition_id)
+  ├── condition_id   varchar(128)  -- hex string from Polymarket
+  ├── question       text          -- e.g., "Will Bitcoin reach $100K?"
+  ├── slug           varchar(256)
+  ├── category       varchar(128)
+  ├── tags           text[]        -- ["Crypto", "Bitcoin"]
+  ├── outcomes       text[]        -- ["Yes", "No"]
+  ├── status         varchar(16)   -- active, resolved
+  ├── active         boolean
+  ├── end_date       timestamptz
+  ├── resolution_date timestamptz
+  ├── winning_outcome varchar(128)
+  ├── volume         numeric(24,2)
+  └── liquidity      numeric(24,2)
+
+polymarket_tokens (PK: token_id, FK: condition_id → polymarket_conditions.condition_id)
+  ├── token_id       varchar(128)  -- large integer string
+  ├── condition_id   varchar(128)
+  ├── outcome        varchar(128)  -- "Yes" or "No"
+  ├── outcome_index  integer       -- 0 or 1
+  ├── price          numeric(8,4)
+  ├── bid/ask        numeric(8,4)
+  └── volume         numeric(24,2)
+```
+
+Relationship: `polymarket_conditions` 1->N `polymarket_tokens` (typically 2: Yes + No)
+
+Sync: `ssmd-polymarket-sync` CronJob runs `polymarket sync` every 6h (+20min offset). Syncs from Gamma REST API.
+
+Key detail: Connector subscribes to `token_id`s (not condition_ids). The token_id is what goes on WebSocket subscriptions. Secmaster sync discovers new conditions/tokens which the connector picks up on next restart (via polymarket-rediscovery CronJob every 6h).
+
 Analyze from your specialty perspective and return:
 
 ## Concerns (prioritized)
