@@ -141,6 +141,17 @@ Authenticated:
 - Some authenticated endpoints return centi-cents (divide by 10,000)
 - Market ticker format: `{SERIES}-{DATE}-T{STRIKE}` (e.g., KXBTCD-26FEB03-T97500)
 
+**Amend Endpoint Quirks (`POST /orders/{id}/amend`):**
+- Both `yes_price` AND `count_fp` are REQUIRED in every amend request (neither is optional)
+- Response new order only populates `remaining_count_fp`, NOT `count_fp` — use remaining for quantity
+- Loses queue priority (old order cancelled, new order created with new order_id)
+- Cannot amend filled/cancelled orders: returns "CANNOT_UPDATE_FILLED_ORDER"
+
+**Decrease Endpoint Quirks (`POST /orders/{id}/decrease`):**
+- Clamps `reduce_by` to available quantity instead of rejecting over-decreases (returns success)
+- Preserves queue priority (unlike amend)
+- Cannot decrease filled/cancelled orders
+
 **API Changes (Feb 2026 deprecation):**
 - `count_fp` is now a string in both requests and responses (was f64)
 - `TimeInForce` requires full names: `good_till_canceled`, `immediate_or_cancel` (not `gtc`/`ioc`)
