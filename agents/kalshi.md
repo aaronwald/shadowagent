@@ -36,21 +36,32 @@ You understand Kalshi's prediction market platform and its unique characteristic
 
 REST API (v2):
 ```
-Base: https://api.elections.kalshi.com/v1 (production)
-      https://demo-api.elections.kalshi.com/v1 (demo)
+Base: https://trading-api.kalshi.com (production)
+      https://demo-api.kalshi.co (demo)
 
 Public endpoints:
-GET /markets                    # List markets
-GET /markets/{ticker}           # Market details
-GET /markets/{ticker}/orderbook # L2 orderbook snapshot
-GET /series/{ticker}            # Series info
+GET /trade-api/v2/markets                    # List markets
+GET /trade-api/v2/markets/{ticker}           # Market details
+GET /trade-api/v2/markets/{ticker}/orderbook # L2 orderbook snapshot
+GET /trade-api/v2/series/{ticker}            # Series info
 
 Authenticated endpoints:
-POST /portfolio/orders          # Place order
-DELETE /portfolio/orders/{id}   # Cancel order
-GET /portfolio/positions        # Current positions
-GET /portfolio/balance          # Account balance
+POST /trade-api/v2/portfolio/orders              # Place order
+DELETE /trade-api/v2/portfolio/orders/{id}        # Cancel order
+POST /trade-api/v2/portfolio/orders/{id}/amend    # Amend price/quantity (loses queue priority)
+POST /trade-api/v2/portfolio/orders/{id}/decrease  # Reduce quantity (preserves queue priority)
+DELETE /trade-api/v2/portfolio/orders/batched      # Batch cancel (requires order IDs in body)
+GET /trade-api/v2/portfolio/orders?status=resting  # List resting orders
+GET /trade-api/v2/portfolio/positions              # Current positions
+GET /trade-api/v2/portfolio/fills                  # List fills
+GET /trade-api/v2/portfolio/balance                # Account balance
 ```
+
+**REST API Authentication (RSA-PSS):**
+- RSA-PSS-SHA256 signature: `base64(sign(timestamp + METHOD + path))`
+- Query strings NOT included in signature (sign path only, split at `?`)
+- Headers: `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-SIGNATURE`, `KALSHI-ACCESS-TIMESTAMP`
+- Timestamp: current Unix epoch as string
 
 WebSocket Channels:
 ```
@@ -89,9 +100,9 @@ Authenticated:
 - Price tick: 1 cent
 
 **Rate Limits:**
-- REST: 100 requests/minute per endpoint group
-- WebSocket: subscription limits vary by channel
-- Batch endpoints available for bulk operations
+- Tiered system: Basic (10 req/sec), Advanced (30 req/sec), Premium (100 req/sec)
+- Rate limit info returned in response headers
+- 429 status with `retry-after` header on limit breach
 
 **Key Operational Patterns:**
 - Markets close at specific times (close_time)
@@ -129,6 +140,11 @@ Authenticated:
 - Prices in cents, not dollars
 - Some authenticated endpoints return centi-cents (divide by 10,000)
 - Market ticker format: `{SERIES}-{DATE}-T{STRIKE}` (e.g., KXBTCD-26FEB03-T97500)
+
+**API Changes (Feb 2026 deprecation):**
+- `count_fp` is now a string in both requests and responses (was f64)
+- `TimeInForce` requires full names: `good_till_canceled`, `immediate_or_cancel` (not `gtc`/`ioc`)
+- Batch cancel requires explicit order IDs: `{"orders": [{"order_id": "..."}]}`
 
 **Secmaster Entity Model (PostgreSQL):**
 
