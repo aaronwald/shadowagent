@@ -154,6 +154,7 @@ Authenticated:
 
 **API Changes (Feb 2026 deprecation):**
 - `count_fp` is now a string in both requests and responses (was f64)
+- `count_fp` rejects trailing zeros beyond 2 decimal places (e.g., "1.00000000" fails — must normalize to "1")
 - `TimeInForce` requires full names: `good_till_canceled`, `immediate_or_cancel` (not `gtc`/`ioc`)
 - Batch cancel requires explicit order IDs: `{"orders": [{"order_id": "..."}]}`
 
