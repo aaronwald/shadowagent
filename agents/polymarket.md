@@ -78,6 +78,35 @@ Messages are array-wrapped JSON (unlike Kalshi's single objects):
 - Most markets resolve automatically based on data feeds
 - Disputed markets go through UMA's optimistic oracle process
 
+**Token ID → Outcome Mapping:**
+
+Token IDs are opaque large integers (80+ digits) — never display them raw to users. Always map to the human-readable `outcome` field:
+
+```
+token_id: 48340583883855238928471003934532981948267472838952439765595020061539421876544
+outcome: "Yes"
+outcome_index: 0
+
+token_id: 71321045193456789012345678901234567890123456789012345678901234567890123456789
+outcome: "No"
+outcome_index: 1
+```
+
+Mapping sources:
+- **PostgreSQL**: `polymarket_tokens.outcome` — canonical source via secmaster sync
+- **Redis monitor cache**: `monitor:markets:{event}` hash stores `outcome` and `outcome_index` per token
+- **Gamma API**: `tokens[].outcome` in condition response
+
+Display rules:
+- **Market/ticker column**: Show `outcome` ("Yes", "No", "Up", "Down") instead of token_id
+- **Title column**: Show the condition `question` or last price, not the token_id
+- **Snap data**: Stored at condition level (`snap:polymarket:{condition_id}`), contains `price_changes[]` array with per-token `asset_id` → match to `token_id` for price enrichment
+
+Multi-outcome conditions (rare but exist):
+- Some conditions have 3+ tokens (e.g., "Which team wins?" → token per team)
+- `outcome_index` preserves ordering (0, 1, 2, ...)
+- Always use `outcome` field, never assume binary Yes/No
+
 **Common Issues:**
 | Issue | Cause | Fix |
 |-------|-------|-----|
@@ -85,6 +114,8 @@ Messages are array-wrapped JSON (unlike Kalshi's single objects):
 | Missing markets | Discovery only at startup | Periodic re-poll or restart |
 | Null category | Gamma `/markets` API deprecated field | Use `/events` with tags[] instead |
 | Large data volume | All-market subscription | Filter to relevant categories/tokens |
+| Raw token_id in UI | Display code not mapping to outcome | Use `outcome` field from secmaster/monitor cache |
+| Wrong outcome for token | Stale secmaster data | Re-sync: `polymarket sync` CronJob |
 
 **Secmaster Entity Model (PostgreSQL):**
 
