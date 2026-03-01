@@ -107,6 +107,20 @@ Multi-outcome conditions (rare but exist):
 - `outcome_index` preserves ordering (0, 1, 2, ...)
 - Always use `outcome` field, never assume binary Yes/No
 
+**Event vs Condition Title Gap (critical for search):**
+
+Polymarket's Gamma API has an **event** layer above conditions that is NOT stored in our secmaster DB:
+- **Event title**: "What price will Bitcoin hit February 23-March 1?" (human-friendly, searchable)
+- **Condition questions**: "Will Bitcoin reach $80,000?", "Will Bitcoin reach $85,000?" (individual outcomes)
+
+Users search by event title but our DB only has condition questions. This means searching "what price will bitcoin hit" returns zero results even though the conditions exist.
+
+The fix (Track E in TODO.md) requires:
+1. New `polymarket_events` table storing event_id, title, slug, volume
+2. FK from `polymarket_conditions` → `polymarket_events`
+3. Denormalize event_title onto conditions for fast search
+4. Update treemap warmer and search endpoint to include event titles
+
 **Common Issues:**
 | Issue | Cause | Fix |
 |-------|-------|-----|
@@ -116,6 +130,7 @@ Multi-outcome conditions (rare but exist):
 | Large data volume | All-market subscription | Filter to relevant categories/tokens |
 | Raw token_id in UI | Display code not mapping to outcome | Use `outcome` field from secmaster/monitor cache |
 | Wrong outcome for token | Stale secmaster data | Re-sync: `polymarket sync` CronJob |
+| Search misses by event title | Event titles not stored in DB, only condition questions | Track E: add polymarket_events table + denormalize event_title |
 
 **Secmaster Entity Model (PostgreSQL):**
 
@@ -146,6 +161,8 @@ polymarket_tokens (PK: token_id, FK: condition_id → polymarket_conditions.cond
 ```
 
 Relationship: `polymarket_conditions` 1->N `polymarket_tokens` (typically 2: Yes + No)
+
+**Missing entity:** Polymarket events (from Gamma `/events` endpoint) are NOT stored in the DB. The event layer holds the human-readable title (e.g., "What price will Bitcoin hit?") that groups multiple conditions. Track E in TODO.md plans to add a `polymarket_events` table and FK from conditions.
 
 Sync: `ssmd-polymarket-sync` CronJob runs `polymarket sync` every 6h (+20min offset). Syncs from Gamma REST API.
 
