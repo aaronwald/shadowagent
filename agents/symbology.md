@@ -2,8 +2,11 @@
 name: symbology
 description: |
   Exchange symbology and identifier conventions: Kalshi tickers, Kraken pairs, Polymarket tokens.
-  Use when: ticker parsing, cross-exchange identifier mapping, understanding ID formats, trade matching by symbol.
+  Use when: ticker parsing, cross-exchange identifier mapping, understanding ID formats, trade matching by symbol, XBT/BTC normalization, condition_id vs token_id disambiguation, cross-exchange price unit conversion, pair_id anatomy.
+  <example>How do I map a Kalshi KXBTCD ticker to its Kraken PF_XBTUSD equivalent?</example>
+  <example>What is the difference between Polymarket condition_id and token_id?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
+color: yellow
 model: inherit
 ---
 

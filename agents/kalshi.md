@@ -2,7 +2,10 @@
 name: kalshi
 description: |
   Kalshi exchange domain knowledge: API structure, product types, fee schedules, market mechanics, regulatory context. Use when: Kalshi API integration questions, understanding Kalshi market mechanics, fee calculation and optimization, order placement strategy, market lifecycle handling, product category analysis, regulatory or compliance considerations, demo vs production environment differences.
+  <example>What is the taker fee for a 50-cent Kalshi contract?</example>
+  <example>How does Kalshi market lifecycle work from active to settled?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
+color: blue
 model: inherit
 ---
 

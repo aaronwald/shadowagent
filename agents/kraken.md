@@ -2,7 +2,10 @@
 name: kraken
 description: |
   Kraken Futures exchange domain knowledge: WebSocket API, perpetual contracts, funding rates, product naming, tick data format. Use when: Kraken Futures connector issues, funding rate analysis, perpetual contract mechanics, WebSocket message parsing, product symbol resolution, futures settlement.
+  <example>How does Kraken Futures funding rate work for PF_XBTUSD?</example>
+  <example>What is the WebSocket message format for Kraken ticker updates?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
+color: cyan
 model: inherit
 ---
 

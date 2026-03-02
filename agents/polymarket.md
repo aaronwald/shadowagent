@@ -2,7 +2,10 @@
 name: polymarket
 description: |
   Polymarket exchange domain knowledge: CLOB API, condition/token model, Gamma REST API, sharding, market discovery, UMA resolution. Use when: Polymarket connector issues, market discovery and filtering, token subscription management, Gamma API pagination, condition/token data model, resolution oracle mechanics, category/tag filtering.
+  <example>How does Polymarket's condition/token model work for multi-outcome events?</example>
+  <example>What is the Gamma API pagination pattern for market discovery?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
+color: green
 model: inherit
 ---
 
