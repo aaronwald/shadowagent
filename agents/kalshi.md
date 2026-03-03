@@ -102,6 +102,210 @@ Authenticated:
 - Min order size: 1 contract
 - Price tick: 1 cent
 
+**Order Flow (harman OMS):**
+
+Order lifecycle through the harman OMS:
+
+```
+OrderRequest → Pending → Submitted → Acknowledged → Filled/Cancelled/Expired
+                                    → PartiallyFilled → Filled
+                                    → PendingCancel → Cancelled
+                                    → PendingAmend → Acknowledged (new exchange_order_id)
+                                    → PendingDecrease → Acknowledged (same exchange_order_id)
+```
+
+Order states (`OrderState` enum in `harman/src/state.rs`):
+- `Pending` — created, queued for submission
+- `Submitted` — sent to exchange, awaiting acknowledgement
+- `Acknowledged` — exchange confirmed, resting on book
+- `PartiallyFilled` — some contracts filled, remainder resting
+- `Filled` — completely filled (terminal)
+- `PendingCancel` — cancel request sent to exchange
+- `PendingAmend` — amend request sent (price/qty change)
+- `PendingDecrease` — decrease request sent (qty reduction)
+- `Cancelled` — successfully cancelled (terminal)
+- `Rejected` — rejected by exchange or risk check (terminal)
+- `Expired` — expired by exchange, e.g., market settled (terminal)
+- `Staged` — waiting for trigger activation (bracket/OCO legs)
+
+Key types (`harman/src/types.rs`):
+- `Side`: `Yes` / `No` — Kalshi uses yes/no sides, not buy/sell
+- `Action`: `Buy` / `Sell` — combined with side: buy-yes, sell-yes, buy-no, sell-no
+- `TimeInForce`: `Gtc` / `Ioc` — maps to `good_till_canceled` / `immediate_or_cancel` on the API
+- `CancelReason`: `UserRequested`, `RiskLimitBreached`, `Shutdown`, `Expired`, `ExchangeCancel`
+
+Order submission (`KalshiClient::submit_order` in `ssmd-exchange-kalshi/src/client.rs`):
+- Maps `OrderRequest` to `KalshiOrderRequest` with `order_type: "limit"`, `subaccount: 0`
+- Price converted: `price_dollars * 100` → integer `yes_price` (cents) for the API
+- Quantity: `count_fp` as normalized string (no trailing zeros, e.g., `"10"` not `"10.00000000"`)
+- API: `POST /trade-api/v2/portfolio/orders`
+- Returns `exchange_order_id` on success
+
+Cancel order:
+- API: `DELETE /trade-api/v2/portfolio/orders/{order_id}`
+- Returns 404 if order already filled/cancelled
+
+Mass cancel (`cancel_all_orders`):
+- Lists resting orders first: `GET /trade-api/v2/portfolio/orders?status=resting`
+- Batch cancel: `DELETE /trade-api/v2/portfolio/orders/batched` with `{"orders": [{"order_id": "..."}]}`
+- Max 20 per batch request per API docs
+
+Amend order (`amend_order`):
+- API: `POST /trade-api/v2/portfolio/orders/{order_id}/amend`
+- Body: `KalshiAmendRequest` — requires `ticker`, `side`, `action`, `yes_price`, `count_fp`, `subaccount`
+- Both `yes_price` AND `count_fp` are REQUIRED in every amend (neither optional)
+- Loses queue priority — old order cancelled, new order created with new `order_id`
+- Response: `KalshiAmendResponse` with `old_order` and new `order`
+- New order only populates `remaining_count_fp` (not `count_fp`) — remaining IS the total qty
+
+Decrease order (`decrease_order`):
+- API: `POST /trade-api/v2/portfolio/orders/{order_id}/decrease`
+- Body: `KalshiDecreaseRequest` with `reduce_by_fp` (string) and `subaccount`
+- Preserves queue priority (unlike amend)
+- Clamps `reduce_by` to available quantity — does not reject over-decreases
+
+**Fill Flow (harman OMS):**
+
+Fill discovery runs during both crash recovery and periodic reconciliation.
+
+API: `GET /trade-api/v2/portfolio/fills?limit=200` with cursor pagination.
+Optional `min_ts` filter (Unix epoch timestamp) for time-bounded queries.
+
+`KalshiFill` fields (`ssmd-exchange-kalshi/src/types.rs`):
+- `trade_id` — unique trade execution ID
+- `order_id` — exchange order ID this fill belongs to
+- `ticker` — market ticker
+- `side` — `"yes"` or `"no"`
+- `action` — `"buy"` or `"sell"`
+- `yes_price` — fill price in cents (integer)
+- `no_price` — complement price in cents
+- `count` — number of contracts filled (integer)
+- `is_taker` — whether this side was the taker
+- `created_time` — RFC 3339 timestamp
+- `client_order_id` — our UUID if order was placed via harman (None for external fills)
+
+Mapped to `ExchangeFill` in harman:
+- `price_dollars`: `Decimal::new(yes_price, 2)` (cents to dollars)
+- `quantity`: `Decimal::from(count)`
+- `filled_at`: parsed from `created_time` (RFC 3339)
+
+Fill integrity rules:
+- Fills are sacrosanct — never dropped, always recorded
+- External fills (placed on Kalshi website, no `client_order_id`) create synthetic orders in harman via `create_external_order()`
+- External fills are attributed to the user's session (one harman instance = one exchange account)
+- Fills are deduplicated by `trade_id` (DB unique constraint)
+- After recording fills, order states are updated: if `filled_qty >= order.quantity` → `Filled`, else `PartiallyFilled`
+- Metric: `harman_fills_external_imported_total` fires on external fill import
+
+Reconciliation order (in `reconciliation.rs`):
+1. `discover_settlements()` — fetch and record settlements (needed first for position comparison)
+2. `discover_external_orders()` — import unknown resting orders from exchange
+3. `discover_fills()` — import missing fills, update order states
+4. `resolve_stale_orders()` — resolve ambiguous orders using exchange state + settlement context
+5. `compare_positions()` — local vs exchange position comparison (settled tickers excluded)
+
+Recovery order (in `recovery.rs`, runs before API server starts):
+1. `resolve_ambiguous_orders()` — resolve submitted/pending_cancel orders
+2. `discover_external_orders()` — import resting orders
+3. `discover_missing_fills()` — import fills + external fills
+4. `discover_settlements()` — import settlements (after fills, so settled tickers are known)
+5. `verify_positions()` — log position state (settled tickers excluded)
+6. Rebuild risk state
+7. Clean stale queue items
+
+**Settlement Flow (harman OMS):**
+
+Settlement discovery fetches market close payouts from the exchange.
+
+API: `GET /trade-api/v2/portfolio/settlements?limit=200` with cursor pagination.
+Optional `min_ts` filter (Unix epoch timestamp).
+
+`KalshiSettlement` fields (`ssmd-exchange-kalshi/src/types.rs`):
+- `ticker` — settled market ticker
+- `event_ticker` — parent event ticker
+- `market_result` — `"yes"`, `"no"`, `"scalar"`, or `"void"`
+- `yes_count` / `yes_count_fp` — number of yes contracts held at settlement
+- `no_count` / `no_count_fp` — number of no contracts held at settlement
+- `yes_total_cost` — total cost of yes position (integer cents)
+- `no_total_cost` — total cost of no position (integer cents)
+- `revenue` — gross payout at settlement (integer cents)
+- `settled_time` — ISO 8601 timestamp string
+- `fee_cost` — fee charged (string, dollars)
+- `value` — optional market value (integer cents)
+
+Mapped to `ExchangeSettlement` in harman:
+- `market_result`: `MarketResult` enum — `Yes`, `No`, `Scalar`, `Void`
+- `yes_count` / `no_count`: prefer `*_fp` string (Decimal) over integer
+- `revenue_cents`: raw integer from API
+- `fee_cost_dollars`: parsed from `fee_cost` string
+- `value_cents`: optional integer from API
+
+DB storage (`record_settlement` in `harman/src/db.rs`):
+- `revenue_dollars`: `Decimal::new(revenue_cents, 2)` (cents to dollars)
+- `value_dollars`: `Decimal::new(value_cents, 2)` if present
+- Idempotent: `ON CONFLICT (session_id, ticker) DO NOTHING`
+- Returns `true` if new row inserted
+
+Settlement effects on OMS:
+- Settled tickers are excluded from `compare_positions()` — exchange reports zero for settled markets while local fills remain
+- `resolve_stale_orders()` infers cancel reason based on settlement: `Expired` for settled tickers (exchange auto-cancelled at market close), `ExchangeCancel` otherwise
+- `compute_local_positions()` excludes settled tickers — no stale fill data in position view
+- Metric: `harman_reconciliation_settlements_discovered_total`
+
+`MarketResult` enum (`harman/src/types.rs`):
+- `Yes` — the event occurred (yes contract pays $1, no pays $0)
+- `No` — the event did not occur (no contract pays $1, yes pays $0)
+- `Scalar` — continuous outcome (proportional payout)
+- `Void` — market voided, positions returned at cost (rare for crypto markets)
+
+`Settlement` DB record (`harman/src/types.rs`):
+- `id`, `session_id`, `ticker`, `event_ticker`
+- `market_result: MarketResult`
+- `yes_count`, `no_count` (Decimal — contracts held)
+- `revenue_dollars` (Decimal — gross payout)
+- `fee_cost_dollars` (Decimal — fees charged)
+- `value_dollars` (Option<Decimal> — market value)
+- `settled_time`, `created_at`
+
+**P&L Calculation (Design Notes):**
+
+Not yet implemented — deferred as future Track SE work. Design based on settlement data:
+
+Per-market P&L from settlement record:
+```
+realized_pnl = revenue - yes_total_cost - no_total_cost
+net_pnl = realized_pnl - fee_cost
+```
+Where:
+- `revenue` = gross payout at settlement (the amount received)
+- `yes_total_cost` = total cost basis of yes position
+- `no_total_cost` = total cost basis of no position
+- `fee_cost` = fees charged on the settled position
+- All values from API in cents, stored as dollars in DB (divide by 100)
+
+Aggregate P&L: sum `net_pnl` across all settled markets in a session.
+
+Void settlements: positions returned at cost, so `realized_pnl` should be ~0 (rare for crypto markets).
+
+Open position mark-to-market (future): use snap prices for unrealized P&L:
+- Long yes: `yes_bid * qty` (what you could sell for)
+- Short yes (long no): `(1.00 - no_bid) * qty`
+
+Settlements are keyed to markets (not orders), so P&L naturally rolls up at the ticker level. The DB unique constraint is `(session_id, ticker)`.
+
+High-water mark optimization (deferred): store latest `settled_time` and pass as `min_ts` on next fetch to reduce API calls. Currently fetches all settlements every cycle (idempotent via DB upsert). Low priority since settlement volume is low.
+
+**API Price Conventions:**
+
+Kalshi is migrating from integer cents to `_dollars` fields:
+- **Deadline**: March 5, 2026 — integer cent fields deprecated
+- **harman**: `KalshiOrderRequest.yes_price` is still integer cents (converted from `price_dollars * 100`)
+- **Settlement API**: `revenue`, `yes_total_cost`, `no_total_cost` are integer cents; `fee_cost` is a string in dollars
+- **Fill API**: `yes_price` and `no_price` are integer cents; `count` is integer contracts
+- **Position API**: `market_exposure` is integer cents
+- **Invariant**: `yes_price + no_price = 100` (cents) or `$1.00` (dollars) always
+- **harman internal**: all prices stored as `Decimal` dollars (e.g., `0.65` = 65 cents)
+
 **Rate Limits:**
 - Tiered system: Basic (10 req/sec), Advanced (30 req/sec), Premium (100 req/sec)
 - Rate limit info returned in response headers
