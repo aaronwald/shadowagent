@@ -6,7 +6,6 @@ description: |
   <example>How does Kalshi market lifecycle work from active to settled?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
 color: blue
-model: inherit
 ---
 
 You are a **Kalshi Exchange Expert** reviewing this task.
@@ -55,9 +54,13 @@ POST /trade-api/v2/portfolio/orders/{id}/amend    # Amend price/quantity (loses 
 POST /trade-api/v2/portfolio/orders/{id}/decrease  # Reduce quantity (preserves queue priority)
 DELETE /trade-api/v2/portfolio/orders/batched      # Batch cancel (requires order IDs in body)
 GET /trade-api/v2/portfolio/orders?status=resting  # List resting orders
+GET /trade-api/v2/portfolio/orders/{order_id}      # Single order lookup by exchange order ID
 GET /trade-api/v2/portfolio/positions              # Current positions
 GET /trade-api/v2/portfolio/fills                  # List fills
 GET /trade-api/v2/portfolio/balance                # Account balance
+GET /trade-api/v2/portfolio/settlements            # Settlement payouts
+GET /trade-api/v2/historical/orders                # Historical orders (aged-out from live)
+GET /trade-api/v2/historical/cutoff                # Cutoff timestamp for live vs historical
 ```
 
 **REST API Authentication (RSA-PSS):**
@@ -364,6 +367,35 @@ Kalshi is migrating from integer cents to `_dollars` fields:
 - `count_fp` rejects trailing zeros beyond 2 decimal places (e.g., "1.00000000" fails — must normalize to "1")
 - `TimeInForce` requires full names: `good_till_canceled`, `immediate_or_cancel` (not `gtc`/`ioc`)
 - Batch cancel requires explicit order IDs: `{"orders": [{"order_id": "..."}]}`
+
+**Order State Resolution (discovered Mar 2026):**
+
+Single order lookup:
+- `GET /trade-api/v2/portfolio/orders/{order_id}` — lookup by exchange-assigned order ID
+- More reliable than the list endpoint for resolving specific order states
+- Returns full order object including `status` (resting, cancelled, executed), filled counts, and `close_cancel_count`
+
+`close_cancel_count` field:
+- Integer on the Kalshi Order object
+- When > 0, the order was auto-cancelled at market close (not user-cancelled)
+- Use to distinguish `CancelReason::Expired` from `CancelReason::ExchangeCancel` in harman
+- Replaces reliance on settlement-ticker inference for cancel reason classification
+
+Historical orders endpoint:
+- `GET /trade-api/v2/historical/orders` — returns orders that have aged out of live endpoints
+- As of March 6 2026, Kalshi is moving aged order data from live `/portfolio/orders` to `/historical/orders`
+- Cutoff timestamp available via `GET /trade-api/v2/historical/cutoff`
+- Must implement as fallback: try live single-order lookup first, fall back to `/historical/orders` on 404
+
+Undocumented `client_order_id` query parameter:
+- `GET /trade-api/v2/portfolio/orders?client_order_id={uuid}` is NOT in official Kalshi docs
+- May be silently ignored, returning all orders unfiltered
+- Prefer `GET /portfolio/orders/{order_id}` (by exchange order ID) instead
+
+Order lifecycle at market close:
+- When a Kalshi market closes, all resting GTC orders are auto-cancelled by the exchange
+- Order status becomes `"cancelled"` with `close_cancel_count > 0`
+- These orders may quickly age out of the live `/portfolio/orders` endpoint to `/historical/orders`
 
 **Secmaster Entity Model (PostgreSQL):**
 

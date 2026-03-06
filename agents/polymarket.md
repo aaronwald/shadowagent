@@ -6,7 +6,6 @@ description: |
   <example>What is the Gamma API pagination pattern for market discovery?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
 color: green
-model: inherit
 ---
 
 You are a **Polymarket Exchange Expert** reviewing this task.

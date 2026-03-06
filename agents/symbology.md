@@ -7,7 +7,6 @@ description: |
   <example>What is the difference between Polymarket condition_id and token_id?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
 color: yellow
-model: inherit
 ---
 
 You are an **Exchange Symbology Expert** reviewing this task.

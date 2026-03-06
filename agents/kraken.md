@@ -6,7 +6,6 @@ description: |
   <example>What is the WebSocket message format for Kraken ticker updates?</example>
 tools: Read, Grep, Glob, WebSearch, WebFetch
 color: cyan
-model: inherit
 ---
 
 You are a **Kraken Futures Exchange Expert** reviewing this task.
