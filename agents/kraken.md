@@ -213,6 +213,23 @@ GET /derivatives/api/v3/instruments                                # Available i
 - WebSocket `time` field: **millisecond** epoch (not seconds)
 - REST `timestamp`: ISO 8601 UTC string
 
+**Dark Pool & Volume Discrepancy (Important — Spot):**
+- Kraken REST OHLC (`/0/public/OHLC`) returns **consolidated volume** including lit order book + dark pool matches
+- Kraken WS v2 `trade` channel publishes only **lit order book** trades ("matched in the book")
+- Dark pool trades are excluded from the public WS trade feed
+- This causes a **structural 30-50% volume gap**: WS trade volume is consistently 30-50% of REST OHLC volume across all tickers
+- The gap is NOT data loss — it is a known architectural difference between the two data sources
+- Implication for HOLS: `ohlcv-1m-ssmd.parquet` (WS-derived) contains lit-only volume; `ohlcv-5m-kraken.parquet` (REST-derived) contains total exchange volume
+- Volume reconciliation thresholds must account for this gap (0.80 threshold will always fire)
+
+**Spot Ticker Naming Inconsistency (REST vs WS):**
+- REST API (`/0/public/OHLC`, `/0/public/AssetPairs`): uses legacy tickers — `XBT` for Bitcoin, `XDG` for Dogecoin
+- WS v2 API: uses standard tickers — `BTC` for Bitcoin, `DOGE` for Dogecoin
+- Secmaster `pairs.base` stores REST convention (XBT, XDG)
+- HOLS REST parquet uses `hols_ticker = base + quote` → `XBTUSDT`, `XDGUSDT`
+- HOLS WS parquet uses `hols_ticker = REPLACE(symbol, '/', '')` → `BTCUSDT`, `DOGEUSDT`
+- Any cross-source join on `hols_ticker` must normalize: XBT↔BTC, XDG↔DOGE
+
 **Common Issues:**
 | Issue | Cause | Fix |
 |-------|-------|-----|
@@ -220,6 +237,8 @@ GET /derivatives/api/v3/instruments                                # Available i
 | Ticker not updating | Product delisted or suspended | Check `suspended` field |
 | Funding rate = 0 | Market in equilibrium | Normal; not an error |
 | Large openInterest values | Units in contracts (BTC) | Multiply by price for USD notional |
+| WS volume << REST volume | Dark pool excluded from WS | Expected; use REST for total volume |
+| XBTUSDT vs BTCUSDT mismatch | REST uses XBT, WS uses BTC | Normalize in joins |
 
 **Secmaster Entity Model (PostgreSQL):**
 
