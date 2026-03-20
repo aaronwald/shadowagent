@@ -344,6 +344,14 @@ Kalshi is migrating from integer cents to `_dollars` fields:
 - 15-min directional: `KXBTC15M-26FEB081915-15` (series-datetime-minute)
 - Range/bracket: `KXBTC-26FEB0620-B79875` (series-date-B+bracket)
 
+**WebSocket Subscription Model:**
+- **No series/event/category-level subscriptions** — Kalshi WS API only supports subscribing to individual market tickers or global (all markets). No wildcards, no event-level or series-level subscriptions.
+- `update_subscription` command exists on WS — supports `add_markets`/`delete_markets` actions to modify subscriptions without full teardown. ssmd connector doesn't use this yet (uses full reconnect on shard changes).
+- **Connector `open_time` filter** — connector only subscribes to markets with `open_time <= NOW + 15min` at startup. Pre-open markets are added dynamically via lifecycle CDC events as they approach open_time. This reduced crypto connector startup subscriptions from ~29K to ~2K.
+- **Kalshi creates hourly crypto contracts 7 days ahead** with initial small strike sets (e.g., 50 strikes for KXBTCD 5PM EDT), then gradually adds more strikes as the contract approaches (up to 188 strikes per hour).
+- **5PM EDT daily contract anomaly** — `KXBTCD-*17` consistently has fewer strikes than other hours because it's the one created earliest (7 days ahead). Strike count grows as the contract hour approaches.
+- **Two product lines per crypto coin** — above/below (KXBTCD) and range (KXBTC). Different products, different tickers, both legitimate. Same pattern for ETH: KXETHD (above/below) and KXETH (range).
+
 **Common Gotchas:**
 - Orderbook depth is per-market subscription (can't subscribe to all)
 - `orderbook_delta` requires initial `orderbook_snapshot` to build state
